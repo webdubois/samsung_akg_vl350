@@ -1,391 +1,252 @@
-# Samsung VL350 Spotify Connect investigation
+# Samsung AKG VL350: Spotify Connect investigation update
 
-**Investigation period:** 13–14 November 2026  
-**Device family:** Samsung WAH-VL350 / 2017 NetSpeaker  
-**Observed firmware:** `VL350WWB-1005.1`  
-**Platform / protocol reported by the speaker:** `tizen30` / `2.3`
+**Update date:** 17 November 2026  
+**Status:** Unresolved; investigation in progress  
+**Scope:** Native Spotify Connect on Samsung AKG VL350 / WAH-VL350 speakers. This report concerns the original Samsung implementation, not third-party playback integrations.
 
-## Executive summary
+## Summary
 
-Two Samsung VL350 speakers were investigated, using ChatGPT, after they stopped appearing in Spotify's Connect device picker. Both speakers remain reachable on the LAN, respond to Samsung's local-control interface, and expose Samsung UPnP/ DLNA services. Their firmware also reports Spotify in its music-content-provider catalogue.
+Two Samsung AKG VL350 speakers remain reachable on the local network and controllable through SmartThings. Native TuneIn playback works. However, neither speaker is currently discovered by Spotify as a Spotify Connect device, and the owner reports that Spotify and Deezer are no longer selectable in the SmartThings Music Services menu.
 
-However, neither speaker was observed advertising the DNS-SD service `_spotify-connect._tcp.local`. During the same discovery test, the phone queried for that service and another brand's smart speaker on the network answered with a valid Spotify Connect service record. This is a useful positive control: the phone's discovery query and LAN mDNS visibility were working, but the VL350s did not advertise themselves as Spotify Connect devices.
+The firmware's Samsung content-provider (CPM) interface still lists Spotify and Deezer, and it accepts a request to select Spotify. That acknowledgement does **not** demonstrate that the Spotify application or Spotify Connect service has started. In the controlled test performed after TuneIn was stopped, the speaker remained in Bluetooth/no-device state rather than showing an active Spotify playback session. No `\_spotify-connect.\_tcp` advertisement was observed.
 
-The evidence therefore points to a **speaker-side Spotify Connect advertisement / ZeroConf problem**, or to the Spotify Connect component not being enabled or started. It does **not** yet identify the cause. In particular, the investigation has not established whether the provider is disabled, failing to initialise, unable to authenticate, or affected by a service-side change.
+A separate SmartThings Community thread reports the same Spotify Connect disappearance on VL350 and VL550 speakers beginning in March 2026. Deezer Connect is a separate case: Deezer officially discontinued Deezer Connect for all devices in May 2025.
 
-The firmware's Spotify provider catalogue entry and the Spotify Connect ZeroConf service are separate things. A catalogue entry is not proof that the Connect listener or its mDNS advertisement is running.
+No fix has been established. The next technical step is offline analysis of the original firmware package to determine whether the Spotify Connect component, its launch configuration and its dependencies are still present.
 
-## Main findings
+## Device and firmware baseline
 
-### 1. Device identity and firmware
+The tested units identify themselves as:
 
-The speakers identify as:
+| Property | Observed value |
+| - | - |
+| Product/model string | `WAH-VL350` |
+| Platform | `tizen30` |
+| Samsung protocol version | `2.3` |
+| Installed software version | `VL350WWB-1005.1` |
+| Test speaker | `192.168.1.166` |
+| Second speaker | `192.168.1.167` |
 
-- Model: `WAH-VL350`
-- Platform: `tizen30`
-- Protocol version: `2.3`
-- Software version: `VL350WWB-1005.1`
 
-The two units were on the same LAN and were reachable at the time of testing.
+The IP addresses are local addresses from the test network and are included only to make the recorded tests reproducible. No account identifiers, device UUIDs or MAC addresses are included here.
 
-### 2. Spotify appears in the Samsung content-provider catalogue
+Firmware files retained for analysis:
 
-A SmartThings-to-speaker capture on TCP port `56001` exposed the speaker's Samsung interactive AES128-style session. The exchange began with a proprietary request beginning `2_AES_CBC`, followed by a speaker response containing `HTTP/1.1 211 AES128`. Subsequent requests used opaque/Base64-looking request paths and included headers such as `Connection: interactive` and `Accept-Encoding: aes128`.
-
-Within that session, the speaker returned a `CPM` response for `CpList`. The captured XML included:
-
-```xml
-<method>CpList</method>
-<response result="ok">
-  <listtotalcount>25</listtotalcount>
-  <liststartindex>0</liststartindex>
-  <listcount>25</listcount>
-  <cplist>
-    <cp>
-      <cpid>1</cpid>
-      <cpname>Spotify</cpname>
-      <signinstatus>0</signinstatus>
-    </cp>
-    <cp>
-      <cpid>2</cpid>
-      <cpname>Deezer</cpname>
-      <signinstatus>0</signinstatus>
-    </cp>
-    <cp>
-      <cpid>7</cpid>
-      <cpname>BugsMusic</cpname>
-      <signinstatus>0</signinstatus>
-    </cp>
-    <cp>
-      <cpid>19</cpid>
-      <cpname>MelOn</cpname>
-      <signinstatus>0</signinstatus>
-    </cp>
-    <cp>
-      <cpid>25</cpid>
-      <cpname>TuneIn</cpname>
-      <signinstatus>0</signinstatus>
-    </cp>
-  </cplist>
-</response>
-```
-
-**Important qualification:** the response reported `listtotalcount=25` and `listcount=25`, but the excerpt recovered from the capture showed only five provider elements. Do not treat the five visible entries as a complete list of all 25 providers without obtaining the full response. The meaning of `signinstatus=0` has not been established; it should not automatically be interpreted as “signed out”.
-
-A separate `Feature` response included:
-
-```xml
-<musiccontentsprovider>1</musiccontentsprovider>
-<wifidlna>1</wifidlna>
-<dmr>1</dmr>
-```
-
-This confirms that the speaker reports music-content-provider and DLNA/DMR features as enabled. It does not prove that Spotify's Connect ZeroConf server is active.
-
-Other SmartThings responses identified the model, software version, speaker name, volume, mute state, current function, and platform. These were ordinary state/configuration responses; the current function varied with the speaker's state (for example, Bluetooth versus Wi-Fi/DLNA).
-
-### 3. Spotify Connect mDNS discovery is missing from both VL350s
-
-The phone's Spotify device-picker search generated DNS-SD queries for:
-
-```text
-_spotify-connect._tcp.local
-```
-
-The queries were visible over IPv4 and IPv6. Another brand's more modern smart speaker on the same LAN answered with a Spotify Connect service record. The observed third party record included:
-
-- Service type: `_spotify-connect._tcp.local`
-- TCP port: `4070`
-- TXT record: `CPath=/spotifyConnect`
-
-Neither VL350 advertised `_spotify-connect._tcp.local` in the captures. The broad discovery capture also showed no Spotify Connect service response from either speaker.
-
-A separate capture of UDP port `5353` showed mDNS traffic from other LAN devices, confirming that the router-side capture was receiving multicast traffic. No mDNS packets sourced by either VL350 were observed in the relevant captures, including captures around a speaker restart.
-
-This is strong evidence that the VL350s were not advertising Spotify Connect at the time of testing. It is not proof that every mDNS function or process on the speakers is permanently absent; advertisements can be conditional on state, role, or application startup.
-
-### 4. The VL350s are active on the network and use Samsung discovery
-
-The absence of Spotify mDNS does not mean that the speakers' network or discovery stacks are generally inactive.
-
-A packet capture of one speaker showed repeated UDP payloads of this form:
-
-```text
-SEARCH BSDP/0.1
-DEVICE=4
-SERVICE=1
-```
-
-The packets were sent approximately every two seconds to:
-
-- `239.255.255.250:15600`
-- the LAN subnet broadcast address on UDP port `15600`
-
-This traffic is consistent with Samsung-specific discovery traffic, often described as Samsung Service Discovery Protocol (BSDP/SDP) in community dissector material. It is not Spotify Connect discovery.
-
-The speaker also used standard SSDP/UPnP on UDP port `1900`. During a phone discovery exchange, a VL350 sent an SSDP-style `HTTP/1.1 200 OK` response advertising its Samsung RemoteControlReceiver endpoint. The response identified:
-
-```text
-LOCATION: http://<speaker-ip>:7676/rcr/
-ST: urn:samsung.com:device:RemoteControlReceiver:1
-SERVER: SHP, UPnP/1.0, Samsung UPnP SDK/1.0
-```
-
-Thus, Samsung discovery and the RCR/UPnP service were working even though Spotify Connect was not being advertised.
-
-### 5. Spotify Connect's usual ZeroConf mechanism
-
-Spotify's commercial-hardware documentation describes a ZeroConf discovery mechanism. A compatible device advertises `_spotify-connect._tcp` using mDNS/DNS-SD, including an SRV record with the HTTP service port and a TXT record containing `CPath`.
-
-The Spotify app then requests the ZeroConf API, typically with an HTTP `getInfo` request. A device that does not advertise the service will normally not be discovered through this path.
-
-This is consistent with the observations in this investigation: the phone queried for the service, the third party (non-Samsung) device answered, and the VL350s did not.
-
-Reference: [Spotify ZeroConf API documentation](https://developer.spotify.com/documentation/commercial-hardware/implementation/guides/zeroconf) and [Spotify ZeroConf FAQ](https://developer.spotify.com/documentation/commercial-hardware/implementation/faqs).
-
-### 6. TCP listeners and UPnP service descriptions
-
-A full TCP connect scan found several listeners. The port scan is a snapshot, and some ports appeared inconsistently between earlier and later probes (likely because the speakers were in differing wake states / input selected states at different times) ; ports should be rechecked before relying on them as a stable inventory.
-
-The most useful confirmed listeners were:
-
-| Port | Observed service / response | Notes |
-|---:|---|---|
-| `7676/tcp` | Samsung RemoteControlReceiver (RCR) | `GET /rcr/` returns a UPnP device description. |
-| `8080/tcp` | Samsung WebServer | `/` returned 404; `/ws/app/` returned 503. Neither result identifies all valid application routes. |
-| `9197/tcp` | UPnP Digital Media Renderer (DMR) | `GET /dmr` returns a UPnP device description. |
-| `15500/tcp` | Open, unknown | Function not identified. |
-| `56000/tcp` | Open, unknown | Function not identified. |
-| `56001/tcp` | Samsung local control interface | SmartThings interactive session and `/UIC` requests observed. |
-
-The later all-port scan reported the following additional listeners in that particular scan:
-
-- Speaker A: `8187`, `57012`, and `59762` (purpose not identified).
-- Speaker B (in a different wake state at this moment): `43172` (purpose not identified).
-
-The scan also showed a large number of filtered/no-response ports on Speaker B, so it should not be treated as a perfectly complete inventory for that unit. Earlier targeted scans identified TLS listeners on `35163` and `57522`, presenting a Samsung OCF device certificate. Those ports did not appear in the later all-port scan, so their availability may be intermittent, state-dependent, or affected by scan behaviour. Their exact application-level roles were not established. A normal HTTP GET after TLS negotiation caused a TLS decode error/close, consistent with these not being ordinary HTTPS endpoints.
-
-The third-party device advertised TCP port `4070`; that is the third party device's own advertised port, not a universal Spotify Connect port. A direct scan of port `4070` found it closed on both VL350s. The later all-port scan did not identify a Spotify Connect listener on either device. Because a Spotify implementation could use another port, the closed `4070` result alone does not prove that no ZeroConf HTTP service exists anywhere.
-
-### 7. UPnP descriptions are the same on both speakers
-
-The two speakers returned substantially identical UPnP device descriptions, with different friendly names and UUIDs.
-
-#### RCR at `http://<speaker-ip>:7676/rcr/`
-
-The description identifies:
-
-```text
-urn:samsung.com:device:RemoteControlReceiver:1
-```
-
-It exposes Samsung's `MultiScreenService`, with the control path:
-
-```text
-/RCR/control/MultiScreenService
-```
-
-The SCPD lists one action: `SendKeyCode`.
-
-The RCR device description includes an `Application-URL` pointing to:
-
-```text
-http://<speaker-ip>:8080/ws/app/
-```
-
-A direct GET to `/ws/app/` returned HTTP 503. This only establishes that the requested root path was unavailable; it does not establish that the application framework or every route under `/ws/app/` is unavailable.
-
-#### DMR at `http://<speaker-ip>:9197/dmr`
-
-The description identifies a standard UPnP MediaRenderer:
-
-```text
-urn:schemas-upnp-org:device:MediaRenderer:1
-```
-
-It exposes four services:
-
-- `RenderingControl`
-- `ConnectionManager`
-- `AVTransport`
-- `StreamSplicing`
-
-Both speakers published matching SCPD action lists.
-
-The `AVTransport` service includes ordinary renderer operations such as `Play`, `Pause`, `Stop`, `Seek`, `SetAVTransportURI`, `GetMediaInfo`, and `GetTransportInfo`. Samsung-specific extensions include `X_PrefetchURI`, `X_DLNA_GetBytePositionInfo`, `X_GetStoppedReason`, and `X_PlayerAppHint`.
-
-`X_PlayerAppHint` takes `InstanceID`, `UpnpClass`, and `PlayerHint`. Its existence does not establish that it launches a music provider or selects Spotify.
-
-`StreamSplicing` exposes only:
-
-- `SetBreakAuxStreamPlaylist(BreakId, BreakSpliceOutPosition, ExpirationTime, AuxStreamPlaylist)`
-- `SetBreakAuxStreamTrigger(BreakId, BreakTriggerHigh, BreakTriggerLow)`
-
-These are auxiliary stream-break/playlist operations, not identified Spotify controls. No Spotify-specific action was found in the published UPnP SCPDs.
-
-The `RenderingControl` service exposes volume and mute operations alongside a number of video/TV-oriented extension actions. `ConnectionManager` exposes standard connection and protocol-information operations.
-
-### 8. Samsung's CPM provider API: promising but not yet exercised correctly
-
-A community reverse-engineered Samsung WAM API reference documents commands including:
-
-- `GetCpList`
-- `GetCpInfo`
-- `SetCpService`
-
-The older reference uses HTTP GET requests to `/CPM` on port `55001`. It includes examples for querying Spotify and selecting a provider by `cpservice_id`.
-
-On the VL350, port `55001` was closed. Plain HTTP attempts to issue `GetCpList` and `GetCpInfo` through port `56001` did not return the requested method; instead, the server returned generic/session-dependent responses such as `CurrentFunc` or `MuteStatus`. This is not evidence that Spotify or CPM is absent. The actual SmartThings exchange uses a proprietary interactive AES128-style session, so the old cleartext WAM examples cannot be assumed to work unchanged.
-
-The captured SmartThings session did successfully return `CpList`, including Spotify. A good next research task is to understand the VL350's interactive session well enough to issue a read-only `GetCpInfo` for Spotify and interpret the response. Do not try `SetCpService` until its effect and correct protocol on this model are understood; it may change playback/source state.
-
-Reference: [Samsung WAM API method reference (community reverse-engineered)](https://github.com/bacl/WAM_API_DOC/blob/master/API_Methods.md). This documentation is for older WAM firmware and is not a guarantee of VL350 compatibility.
-
-### 9. Other network and cloud observations
-
-A 51-second capture during a device-picker test showed the speaker making DNS lookups for `connect.deezer.com` and `opml.radiotime.com`. It made an HTTP request to TuneIn's `opml.radiotime.com` endpoint. No identifiable Spotify DNS lookup or new Spotify connection from the speaker was observed in that short capture.
-
-That absence is only a clue. The Spotify provider may not have been active, may use an already-open connection, may resolve through a cached result, or may only contact services after explicit selection.
-
-The speaker was also observed communicating with Samsung cloud endpoints, including hostnames under `samsungiotcloud.com`, `samsungcloudsolution.com`, and `samsungqbe.com`.
-
-A separate TLS capture showed these certificate chains:
-
-| Hostname pattern | Certificate / issuer observed |
-|---|---|
-| `*.samsungcloudsolution.com` | Samsung Hubsite CA |
-| `*.samsungiotcloud.com` | Samsung Electronics OCF Server SubCA, chaining to Samsung OCF Root CA |
-| `*.samsungqbe.com` | Thawte TLS RSA CA G1, chaining to DigiCert Global Root G2 |
-
-No eMudhra `emSign ECC Root CA - G3` or affected intermediate was seen in the TLS handshakes captured. This does not establish that the speaker's entire trust store lacks eMudhra certificates, or that every remote endpoint has been inspected. The local OCF certificate observed on the speaker is Samsung-issued, not eMudhra-issued. The OCF connection appeared to use certificate-based client/server authentication, making a generic HTTPS MITM proxy unsuitable without understanding that authentication.
-
-**Conclusion on the eMudhra angle:** the captured chains provide no evidence that the eMudhra certificate incident is relevant to the observed VL350 connections. No attempt was made to impersonate a public service using compromised CA material.
-
-### 10. OCF / CoAP probes
-
-The speakers' OCF TLS certificate identified the device as a 2017 NetSpeaker and chained to Samsung's OCF CA hierarchy.
-
-The speaker was observed joining IPv6 multicast groups including `ff02::158`, `ff03::158`, and `ff05::158`, as well as IPv4 multicast group `224.0.1.187`.
-
-However, direct CoAP GET probes to `/oic/res` on UDP port `5683` (IPv4 and IPv6 link-local) did not receive responses. A DTLS probe to UDP port `5684` also received no response. These probes are inconclusive: they do not prove that OCF is absent, especially given the observed OCF TLS listeners and multicast membership.
-
-## Reproducible checks
-
-The following read-only checks were useful during the investigation. Replace `<speaker-ip>` with the speaker's current address.
-
-### Check Spotify Connect mDNS
-
-```bash
-avahi-browse -rt _spotify-connect._tcp
-```
-
-A positive result should show an instance, host, port, and TXT data including `CPath`. The third party device provided a positive control in this investigation.
-
-### Capture mDNS, SSDP, and Samsung discovery
-
-On OpenWrt, with the LAN bridge name adjusted if necessary:
-
-```bash
-tcpdump -ni br-lan -e -nn -s0 -vv \
-  'udp port 5353 or udp port 1900 or udp port 15600'
-```
-
-To write a capture file instead:
-
-```bash
-tcpdump -ni br-lan -s0 -w vl350-discovery.pcap \
-  'udp port 5353 or udp port 1900 or udp port 15600'
-```
-
-When publishing captures, inspect and redact local addresses, MAC addresses, UUIDs, device identifiers, phone identifiers, user identifiers, and any credentials or tokens first.
-
-### Inspect the UPnP device descriptions
-
-```bash
-curl -i --max-time 5 "http://<speaker-ip>:7676/rcr/"
-curl -i --max-time 5 "http://<speaker-ip>:9197/dmr"
-```
-
-### Retrieve the SCPD action definitions
-
-```bash
-for path in AVTransport_1.xml ConnectionManager_1.xml \
-            RenderingControl_1.xml StreamSplicing_1.xml; do
-  echo "===== $path ====="
-  curl -fsS "http://<speaker-ip>:9197/$path"
-done
-```
-
-For Samsung's RCR service:
-
-```bash
-curl -fsS "http://<speaker-ip>:7676/rcr/MultiScreenService.xml"
-```
-
-### Check whether a port 4070 is open, as it was on the third party device:
-
-```bash
-nmap -n -Pn -sT -p 4070 <speaker-A-ip> <speaker-B-ip>
-```
-
-In this investigation, TCP 4070 was closed on both VL350s. This is not a definitive test for a ZeroConf server on another port.
-
-## Firmware artifact notes
-
-A firmware package named `WAM-HKA17WWC.zip` was examined locally. The archive and extracted `image/upgrade.msd` hashes were:
-
-| Artifact | Size | SHA-256 |
-|---|---:|---|
+| File | Size | SHA-256 |
+| - | -: | - |
 | `WAM-HKA17WWC.zip` | 424,995,147 bytes | `e084891951a9deee44490282108d5f147ecc55a73dae57a0dc43c13a8ec93436` |
 | `image/upgrade.msd` | 424,926,033 bytes | `5a84740be407f8de1e7d49346547234378083df946e019c02802d21013f56340` |
 
-The `.msd` file begins with `MSDU11(`. A `Salted__` marker was found at offset 369, followed by additional markers at regular 3,608-byte intervals through the first part of the file. The format and encryption/container structure have not been established, and the image has not been decrypted or modified. The package name and hashes are recorded here for reproducibility; this report does not claim that this package is installed on either speaker.
 
-## Current assessment
+The `.msd` file begins with an `MSDU11(` marker and contains `Salted\_\_` byte sequences at offsets 369, 3977, 7585, 11193, 14801, 18409 and 22017. These observations suggest an encrypted or chunked container, but its structure and encryption scheme have **not** been established. No firmware has been modified or flashed.
 
-### Confirmed by direct observation
+## Current user-visible behaviour
 
-- Both speakers identify as `WAH-VL350` and report software version `VL350WWB-1005.1`.
-- SmartThings can communicate with the speakers through the Samsung local interface on TCP 56001.
-- The firmware's `CpList` response includes Spotify (`cpid=1`).
-- The speaker reports `musiccontentsprovider=1`.
-- Both speakers expose Samsung RCR on TCP 7676 and a UPnP DMR on TCP 9197.
-- Both DMR descriptions expose `RenderingControl`, `ConnectionManager`, `AVTransport`, and `StreamSplicing`.
-- The speakers send Samsung-specific UDP discovery packets on port 15600 and participate in SSDP/UPnP discovery.
-- The phone queries for `_spotify-connect._tcp.local`; the third party device responds; neither VL350 advertises the service in the captures.
-- TCP 4070 is closed on both speakers.
+- SmartThings can still discover/control the speakers.
+
+- TuneIn is available through SmartThings and native TuneIn radio playback works.
+
+- The owner reports that Spotify and Deezer have disappeared from the SmartThings Music Services menu. The exact date when each entry disappeared from the menu has not been established.
+
+- Neither speaker appears in `avahi-browse -rt \_spotify-connect.\_tcp` during the tests. An unrelated third party smart speaker was visible in an earlier browse, providing a positive control for mDNS browsing on the LAN.
+
+- DLNA functionality remains available. UPnP AVTransport, ConnectionManager and RenderingControl descriptions were retrieved from the speaker; this is consistent with the observed DLNA playback capability.
+
+## Samsung local provider interface
+
+The speakers expose a Samsung-specific UIC/CPM interface on TCP port `56001`. SmartThings traffic captures showed the phone communicating with the speakers on this interface. The interaction is not reliably reproduced by issuing isolated, stateless HTTP requests.
+
+### Interactive request sequence
+
+A repeatable way to issue a CPM request is to open a TCP connection to port `56001`, send a `GET /connect` request with `Connection: interactive`, then send the CPM request on the same socket. The `/connect` exchange produces empty HTTP 200 responses; the subsequent CPM command returns the XML result.
+
+For example, the following request was accepted:
+
+```
+\<name\>SetCpService\</name\>  
+\<p type="dec" name="cpservice\_id" val="1"/\>
+```
+
+The speaker returned both a `CpChanged` notification and a `SelectCpService` response containing:
+
+```
+\<response result="ok"\>  
+    \<cpname\>Spotify\</cpname\>  
+    \<timestamp\>2026-11-17T22:54:01Z\</timestamp\>  
+    \<signinstatus\>0\</signinstatus\>  
+\</response\>
+```
+
+This proves that the CPM command handler accepted the provider-selection request. It does **not** prove that Spotify playback began or that Spotify Connect was launched.
+
+### Provider catalogue
+
+CPM catalogue responses on both speakers included these entries:
+
+| Provider | `cpid` |
+| - | :-: |
+| Spotify | `1` |
+| Deezer | `2` |
+| TuneIn | `25` |
+
+
+Some responses reported `listtotalcount=25` and `listcount=25`, while the returned XML contained only a subset of entries. This report therefore records only the provider entries actually observed; it does not claim that the full 25-entry catalogue was recovered.
+
+The fact that Spotify and Deezer remain in this local catalogue does not establish that their applications are currently launchable, that their cloud services remain compatible, or that SmartThings should display them.
+
+### `GetCpInfo` comparison
+
+Using the interactive connection, `GetCpInfo` returned:
+
+- **Spotify:** `result="ok"`, `cpname=Spotify`, `signinstatus=0`, and a timestamp matching the preceding Spotify selection. No `audioinfo` block was returned.
+
+- **TuneIn while playing:** `result="ok"`, `signinstatus=0`, and an `audioinfo` block containing the station title and `playstatus=play`.
+
+- **TuneIn after it was deliberately stopped:** the same provider query returned `audioinfo` with `playstatus=stop`.
+
+TuneIn therefore played successfully while reporting `signinstatus=0`. That value must not be interpreted as proof that Spotify is signed out, disabled or failing.
+
+The Spotify timestamp matched the timestamp returned by the selection command rather than the time of the later query. It may be stored provider metadata; its exact meaning is unknown.
+
+### Source mode and selection are not the same thing
+
+`GetFunc` returned different states depending on the speaker's operating context:
+
+- With the SmartThings Music Services screen active, it returned `function=wifi`, `submode=cp` in one set of checks.
+
+- Outside that context, earlier checks returned `function=wifi`, `submode=dlna`.
+
+- In a controlled test after TuneIn had been stopped, the speaker reported `function=bt`, `devicetype=none`, `connection=off` before and after `SetCpService` selected Spotify.
+
+These observations show that `cp` is a generic content-provider mode, not proof of Spotify playback. They also show that `SetCpService` can return success without visibly transitioning the source to an active Spotify session.
+
+During an earlier test, TuneIn continued playing after the programmatic Spotify selection. `GetCpInfo` for TuneIn still reported `playstatus=play`. This confirmed that the provider-selection acknowledgement had not replaced the active TuneIn stream.
+
+A later controlled test stopped TuneIn first. The TuneIn provider then reported `playstatus=stop`; after Spotify selection the speaker remained in Bluetooth/no-device state. Spotify still did not appear in mDNS discovery.
+
+### Interface caveats
+
+- The owner observed that some UIC/CPM requests time out or return a generic UIC `MainInfo` response unless SmartThings is open on the Music Services screen.
+
+- Isolated `curl` requests to `/CPM` are therefore not a dependable way to infer provider state. Use the interactive `/connect` exchange when reproducing CPM queries.
+
+- A `GetPlayStatus` request to `/UIC` returned `CurrentFunc` on this firmware, not a distinct `PlayStatus` response. It has not been validated as a playback-status query for the VL350.
+
+- `GetCpInfo` and `GetCpList` examples in the community-maintained [Samsung WAM API notes](https://github.com/bacl/WAM_API_DOC/blob/master/API_Methods.md) are useful protocol clues, but that document is based on older WAM products and is not authoritative VL350 documentation.
+
+## Network observations
+
+### Spotify Connect / mDNS
+
+Repeated runs of:
+
+```
+avahi-browse -rt \_spotify-connect.\_tcp
+```
+
+returned no Spotify Connect records for either VL350. An unrelated third party smart speaker was visible during an earlier browse, so the browsing host was able to discover at least one `\_spotify-connect.\_tcp` service on the LAN.
+
+### Packet captures
+
+A capture was made on the LAN router’s interface while Spotify was selected through the interactive Samsung connection. The later capture included complete TCP and UDP packets for the test speaker over an approximately 68-second interval.
+
+Within that interval:
+
+- no `\_spotify-connect.\_tcp` mDNS announcement from the speaker was observed;
+
+- no DNS query from the speaker was observed;
+
+- no new outbound TCP connection from the speaker was observed after the selection request;
+
+- Samsung local discovery broadcasts were observed, including `SEARCH BSDP/0.1 DEVICE=4 SERVICE=1` on UDP port `15600`.
+
+These are bounded observations from one capture window. They do not prove the speaker never makes an external connection, nor do they rule out traffic before or after the capture.
+
+An earlier, more restrictive capture retained UDP packets and TCP connection-control packets rather than full TCP payloads. It is not suitable for analysing application-level requests. Packet captures are not included in this report because they can disclose local network details and device identifiers; redact them before sharing publicly.
+
+### UPnP and OCF observations
+
+The speaker exposes Samsung AllShare / UPnP services, including AVTransport, ConnectionManager and RenderingControl descriptions. This corroborates that the DLNA renderer stack is present.
+
+An OCF resource-directory request over CoAP-over-TCP/TLS to `/oic/res` returned a resource listing containing Samsung audio resources under `/sec/networkaudio/`, including player, playback, metadata, feature and volume resources. Direct GET requests to protected Samsung audio resources returned CoAP `4.01 Unauthorized`. This indicates that the resources exist but are not readable through the unauthenticated test client. No OCF ownership, provisioning or ACL resources have been modified. OCF authentication is not currently established as the cause of the Spotify problem.
+
+## Related reports and service changes
+
+### Similar VL350/VL550 Spotify Connect reports
+
+A SmartThings Community thread opened on **25 March 2026** reports that Samsung AKG VL350 and VL550 speakers disappeared from Spotify Connect while remaining available in SmartThings and DLNA. The original poster reported that other Spotify Connect hardware on the same network remained discoverable and that router, speaker, SmartThings and Spotify-account troubleshooting had not restored the speakers. Another VL350 owner reported the same issue on 26 March 2026. Further users joined the thread in April.
+
+On **4 April 2026**, the original poster wrote that a Samsung support representative had told them Samsung was receiving many reports and was looking into the issue; the poster also said Spotify had forwarded the case to its developers. These are statements by a community member about support conversations, not a published Samsung or Spotify service bulletin. The thread's **9 July 2026** update expressed the poster's view that the companies had abandoned the speakers, but it did not cite an official end-of-support announcement.
+
+Source: [Samsung AKG VL350/550 speakers disappeared from Spotify Connect — SmartThings Community](https://community.smartthings.com/t/samsung-akg-vl350-550-speakers-disappeared-from-spotify-connect/308656)
+
+### Deezer Connect
+
+Deezer officially announced on **6 May 2025** that it was discontinuing Deezer Connect for all devices. That is a confirmed service-side change and is a plausible explanation for why Deezer Connect no longer works. It does not establish why the Deezer entry remains in the VL350's local provider catalogue, nor does it explain the separate Spotify Connect failure.
+
+Source: [Say Goodbye to Deezer Connect — Deezer Community, 6 May 2025](https://en.deezercommunity.com/product-updates/say-goodbye-to-deezer-connect-80661)
+
+## What is established, and what remains unknown
+
+### Established by tests
+
+1. The tested VL350 firmware identifies itself as `WAH-VL350`, platform `tizen30`, protocol `2.3`, software `VL350WWB-1005.1`.
+
+2. The Samsung CPM catalogue includes Spotify (`cpid=1`), Deezer (`cpid=2`) and TuneIn (`cpid=25`) in the responses observed.
+
+3. TuneIn playback works natively; its provider information reports station metadata and `playstatus=play` when playing.
+
+4. The interactive CPM interface acknowledges `SetCpService` for Spotify and returns a successful `CpInfo` query.
+
+5. Those successful responses do not prove Spotify playback or Spotify Connect startup. In the controlled no-TuneIn test, the speaker remained in Bluetooth/no-device state after Spotify selection.
+
+6. The speakers did not advertise `\_spotify-connect.\_tcp` during the discovery tests.
+
+7. The owner reports Spotify and Deezer are no longer available as selectable items in the SmartThings Music Services UI.
+
+8. A separate multi-user report describes the same Spotify Connect disappearance on VL350/VL550 speakers in 2026.
 
 ### Not established
 
-- Whether Spotify's provider executable/component is installed and starts successfully.
-- Whether the provider is disabled, fails during startup, or fails while authenticating.
-- Whether `signinstatus=0` has a specific signed-in/signed-out meaning on this firmware.
-- Whether the speaker has a Spotify ZeroConf HTTP server on a port other than 4070.
-- Whether the failure is caused by a firmware defect, a change in a Samsung service, a Spotify integration/backend change, or an account/provider-state issue.
-- Whether the eMudhra incident affects any certificate store or endpoint not represented in the captured TLS handshakes.
+- Whether the Spotify Connect executable and its shared libraries remain installed in the firmware.
 
-### Working hypothesis
+- Whether Spotify code is present but failing to start, disabled by configuration, or blocked by an obsolete/incompatible service endpoint.
 
-The most defensible current hypothesis is that **the Samsung music-provider catalogue still contains Spotify, but the Spotify Connect ZeroConf advertisement/service is not active on either VL350**. This is narrower and better supported than saying “Spotify has been removed” or “mDNS is broken”.
+- Whether Samsung's SmartThings provider list is driven by a cloud-side catalogue, local firmware configuration, or both.
 
-## Recommended next investigations
+- Whether Spotify has formally ended support for the VL350. No model-specific official discontinuation notice has been identified in this investigation.
 
-1. **Interrogate Spotify provider metadata read-only.** Work out the Samsung interactive session on TCP 56001 and obtain a genuine `GetCpInfo` response for `Spotify`. The older WAM cleartext examples are useful clues but are not directly compatible evidence for this VL350 firmware.
-2. **Inspect firmware configuration and binaries.** Search the firmware contents for strings and configuration related to `Spotify`, `spotify-connect`, `zeroconf`, `Bonjour`, `_spotify-connect._tcp`, `CPath`, and CPM/provider startup. Identify the relevant process, init script, package, or feature flag before attempting changes.
-3. **Look for an alternative ZeroConf listener.** The absence of service advertisement and closed TCP 4070 do not exclude another port. Search the firmware and, where possible, runtime process/listener tables rather than guessing ports.
-4. **Compare the two speakers.** Their exposed UPnP service descriptions and reported firmware version appear equivalent. A controlled comparison of provider metadata, state, and boot-time logs could reveal whether both fail identically.
-5. **Only then consider a controlled repair.** Avoid factory resets, unofficial firmware flashing, modifying trust stores, or attempting to impersonate Spotify/Samsung cloud services until the responsible component and recovery route are understood.
+- Whether there is a safe, technically viable way to restore native Spotify Connect.
 
-## References
+The theory that the speaker is using obsolete Spotify endpoints or protocols is plausible but remains unverified. The absence of DNS or outbound TCP in a short capture window is not enough to prove it.
 
-- [Spotify for Developers — ZeroConf API](https://developer.spotify.com/documentation/commercial-hardware/implementation/guides/zeroconf) — official description of `_spotify-connect._tcp`, SRV/TXT records, `CPath`, and the HTTP ZeroConf API.
-- [Spotify for Developers — ZeroConf FAQ](https://developer.spotify.com/documentation/commercial-hardware/implementation/faqs) — describes how a client discovers a device and requests `getInfo`.
-- [Spotify for Developers — Technical requirements](https://developer.spotify.com/documentation/commercial-hardware/implementation/requirements/technical) — describes the need for a ZeroConf stack using mDNS and an HTTP server.
-- [Samsung WAM API method reference](https://github.com/bacl/WAM_API_DOC/blob/master/API_Methods.md) — community reverse-engineered command reference for older WAM firmware, including `GetCpList`, `GetCpInfo`, and `SetCpService`; compatibility with VL350 is unverified.
-- [Samsung WAM ports and services](https://sites.google.com/view/samsungwirelessaudiomultiroom/interfaces/ports-services) — community-maintained notes on Samsung soundbar RCR/DMR ports and advertised services; treat as a lead, not authoritative Samsung documentation.
+## Next investigation steps
 
-## Privacy and publication notes
+1. **Analyse the firmware offline.** Determine the container/filesystem format of `upgrade.msd`; enumerate packages, executables, shared libraries, service definitions, startup scripts and configuration files.
 
-This report deliberately omits the speakers' real IP addresses, MAC addresses, UPnP UUIDs, serial-like identifiers, SmartThings mobile UUID, and user identifiers. Do not commit the original PCAPs, firmware binaries, device certificates with private material, or raw SmartThings captures to a public repository. Packet captures can contain persistent identifiers, hostnames, local network topology, and authentication-related data even when payloads appear opaque.
+2. **Search for Spotify components and configuration.** Look for Spotify/Connect-related binaries, process names, service launch definitions, libraries, certificate bundles, endpoint hostnames and discovery settings. Record paths and hashes; do not redistribute proprietary binaries or credentials.
 
-The firmware archive itself is not included. Only its filename, size, and SHA-256 hash are recorded.
+3. **Establish whether a Spotify component is present.** Presence in the firmware is not enough: identify whether it is included in the image for this exact model and whether its startup entry is enabled.
+
+4. **Compare working TuneIn and non-working Spotify paths.** Where possible, compare SmartThings commands and device-side events associated with a successful TuneIn start against Spotify selection. The current `SetCpService` command alone is not a launch command.
+
+5. **Repeat only targeted, non-destructive tests on both speakers.** Preserve the current firmware and collect longer captures only when a specific startup/network hypothesis is being tested.
+
+No factory reset, firmware flash, OCF ownership transfer, ACL write or security-state change has been performed. Those actions should remain off the table until the firmware and failure mechanism are understood.
+
+## Questions for other VL350/VL550 owners
+
+- Did Spotify Connect disappear suddenly, and if so, on what date?
+
+- Did the Spotify entry disappear from SmartThings Music Services, or did it remain selectable while the Connect device disappeared from Spotify apps?
+
+- Which exact model and firmware version are installed?
+
+- Does native TuneIn still play?
+
+- Do you see `\_spotify-connect.\_tcp` in an mDNS/Bonjour browser?
+
+- Did the failure occur on multiple networks, including a phone hotspot?
+
+Please report observations with exact dates and firmware versions. Avoid posting unredacted packet captures, account identifiers, device UUIDs, MAC addresses or credentials.
+
